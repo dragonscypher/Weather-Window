@@ -17,8 +17,7 @@
 ## 📦 Installation
 1. **Clone the Repository**:
    ```bash
-   git clone https://yourrepositorylink.git
-   ```
+   git clone https://github.com/dragonscypher/Weather-Window.git   ```
 2. **Install Dependencies**:
    ```bash
    pip install Adafruit_DHT awscrt yagmail awsiot
