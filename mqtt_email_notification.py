@@ -8,7 +8,8 @@ import boto3
 import time
 
 # AWS IoT Endpoint and Thing Details
-iot_endpoint = os.getenv("IOT_ENDPOINT")
+ssm_client = boto3.client('ssm')
+iot_endpoint = ssm_client.get_parameter(Name='iot_endpoint', WithDecryption=True)['Parameter']['Value']
 mqtt_client_id = "mqtt-client-" + str(uuid4())
 
 temp_sensor = Adafruit_DHT.DHT11
