@@ -1,68 +1,27 @@
-
 import os
-import sys
-import threading
-from uuid import uuid4
 import Adafruit_DHT
-import yagmail
+import json
+from uuid import uuid4
 from awscrt import mqtt, io, auth, http
 from awsiot import mqtt_connection_builder
-import json  # Assuming JSON is used for command-line args parsing if needed
+import boto3
+import time
 
-# Use environment variables for sensitive information
-my_email_password = os.getenv("MY_EMAIL_PASSWORD", "example_password")
-my_email_client = yagmail.SMTP('random_email@example.com', my_email_password)
-
-TEMP_SENSOR = Adafruit_DHT.DHT11
-SENSOR_GPIO_PIN = 4
-
-# MQTT client ID and default message count
+# AWS IoT Endpoint and Thing Details
+iot_endpoint = os.getenv("IOT_ENDPOINT")
 mqtt_client_id = "mqtt-client-" + str(uuid4())
-msg_count = 10
-message_received_count = 0
-all_messages_received_event = threading.Event()
 
-# MQTT connection events
-def handle_connection_interrupt(connection, error, **kwargs):
-    """Handle unexpected disconnection."""
-    print(f"Connection lost. Error: {error}")
+temp_sensor = Adafruit_DHT.DHT11
+sensor_gpio_pin = 4
 
-def handle_connection_restored(connection, return_code, session_present, **kwargs):
-    """Handle reconnection."""
-    print(f"Connection restored. Return code: {return_code}, Session: {session_present}")
-    if return_code == mqtt.ConnectReturnCode.ACCEPTED and not session_present:
-        print("Re-subscribing to topics...")
-        resubscribe_to_topics(connection)
+ssm_client = boto3.client('ssm')
+dynamodb_client = boto3.client('dynamodb')
 
-def resubscribe_to_topics(connection):
-    """Resubscribe to all topics after reconnection."""
-    resubscribe_result, _ = connection.resubscribe_existing_topics()
-    resubscribe_result.add_done_callback(handle_resubscribe_complete)
+def on_connection_interrupted(connection, error, **kwargs):
+    print(f"Connection interrupted. Error: {error}")
 
-def handle_resubscribe_complete(resubscribe_result):
-    """Handle the completion of the resubscription process."""
-    results = resubscribe_result.result()
-    print(f"Resubscribe finished: {results}")
-    for topic, qos in results['topics']:
-        if qos is None:
-            sys.exit(f"Failed to resubscribe to topic: {topic}")
-
-# Message received event handling
-def handle_message_received(topic, payload, dup, qos, retain, **kwargs):
-    """Handle incoming MQTT messages and send an email notification."""
-    message_content = f"{payload.decode()} 
-"
-    print(f"Message on '{topic}': {message_content}")
-    global message_received_count
-    message_received_count += 1
-    if message_received_count >= msg_count:
-        all_messages_received_event.set()
-        try:
-            my_email_client.send(to='random_email@example.com', subject="MQTT Message Notification", contents=message_content)
-            print("Notification email sent.
-")
-        except Exception as e:
-            print(f"Failed to send email: {e}")
+def on_connection_resumed(connection, return_code, session_present, **kwargs):
+    print(f"Connection resumed. Return code: {return_code}, Session present: {session_present}")
 
 if __name__ == '__main__':
     # Initialize MQTT connection to AWS IoT
@@ -71,7 +30,7 @@ if __name__ == '__main__':
     client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
     
     mqtt_connection = mqtt_connection_builder.mtls_from_path(
-        endpoint="YOUR_AWS_IOT_ENDPOINT",
+        endpoint=iot_endpoint,
         cert_filepath="YOUR_CERTIFICATE_FILE_PATH",
         pri_key_filepath="YOUR_PRIVATE_KEY_FILE_PATH",
         client_bootstrap=client_bootstrap,
@@ -83,22 +42,43 @@ if __name__ == '__main__':
 
     print("Connecting to AWS IoT Core...")
     connect_future = mqtt_connection.connect()
-    # Wait for the connection to complete
     connect_future.result()
     print("Connected to AWS IoT Core")
 
-    # Subscribe to your MQTT topic(s) here
-    # Example: mqtt_connection.subscribe(topic="your/topic", qos=mqtt.QoS.AT_LEAST_ONCE, callback=handle_message_received)
-    
     try:
-        print("MQTT message handling loop started...")
-        all_messages_received_event.wait()  # Wait until all messages are received or use another condition
+        while True:
+            humidity, temperature = Adafruit_DHT.read_retry(temp_sensor, sensor_gpio_pin)
+            if humidity is not None and temperature is not None:
+                message = {
+                    "temperature": temperature,
+                    "humidity": humidity,
+                    "timestamp": time.time()
+                }
+                message_json = json.dumps(message)
+                mqtt_connection.publish(
+                    topic="weather/data",
+                    payload=message_json,
+                    qos=mqtt.QoS.AT_LEAST_ONCE
+                )
+                print(f"Published message: {message_json}")
+                # Store data in DynamoDB
+                date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                dynamodb_client.put_item(
+                    TableName='ESP32_Data',
+                    Item={
+                        'date': {'S': date},
+                        'temperature': {'N': str(temperature)},
+                        'humidity': {'N': str(humidity)}
+                    }
+                )
+            else:
+                print("Failed to get reading from the sensor.")
+            time.sleep(10)
     except KeyboardInterrupt:
         print("Program interrupted by user. Exiting...")
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
-        # Clean up and close the connection
         if mqtt_connection:
             disconnect_future = mqtt_connection.disconnect()
             disconnect_future.result()
