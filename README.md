@@ -1,73 +1,27 @@
-# Weather Window: Weather Monitoring System 🌦️
+# Weather Window
 
-## 📜 Abstract
-- **Objective**: Develop a Raspberry Pi-based weather observation system.
-- **Features**: Measures temperature, humidity, and atmospheric pressure.
-- **Alerts**: Activates alerts through email, LED signals, or auditory alarms upon threshold breaches.
-- **Integration**: Utilizes AWS Lambda and AWS SNS for efficient email notifications.
+A Raspberry Pi weather station that reports to AWS. A DHT11 sensor measures temperature and humidity, the readings go to AWS IoT Core over MQTT, and alerts go out by email when a threshold is crossed.
 
-## 🛠️ Prerequisites
-- Raspberry Pi with internet access.
-- DHT11 sensor (or compatible) for environmental readings.
-- Python 3.
-- An AWS account for AWS Lambda, AWS IoT Core, and AWS SNS.
-- Required Python libraries: `Adafruit_DHT`, `awscrt`, `boto3`, `awsiot`.
-- Terraform for infrastructure provisioning.
+## Architecture
 
-## 📦 Installation
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/dragonscypher/Weather-Window.git
-   ```
-2. **Install Dependencies**:
-   ```bash
-   pip install Adafruit_DHT awscrt boto3
-   ```
+1. Raspberry Pi reads the DHT11 on GPIO 4 and publishes with `mqtt_email_notification.py`.
+2. AWS IoT Core receives the messages.
+3. Lambda functions handle connect, store and send-message: they write readings to DynamoDB and trigger alerts.
+4. SNS sends the email notification.
 
-## ⚙️ Configuration
-- Fill in AWS IoT Core details and other AWS resource information in the Python script.
-- Set email credentials as environment variables:
-  ```bash
-  export MY_EMAIL_PASSWORD='your_secure_password'
-  ```
-- Terraform is used to create the required AWS infrastructure, including AWS IoT Thing, Lambda functions, and a DynamoDB table for storing sensor data.
+## Infrastructure
 
-## 🚀 Usage
-1. **Provision AWS Resources**:
-   Run Terraform to create the necessary AWS resources:
-   ```bash
-   terraform init
-   terraform apply
-   ```
-2. **Start the System**:
-   ```bash
-   python mqtt_email_notification.py
-   ```
-3. Monitor weather data, store it in DynamoDB, and receive alerts based on set thresholds.
+Terraform in this repository (`main.tf`, `variables.tf`, `outputs.tf`, `backend.tf`) creates the IoT thing, the Lambda execution role and policy, and the Lambda functions. Remote state goes to an S3 bucket, so set the bucket name in `backend.tf` first.
 
-## 📝 Project Overview
-The Weather Monitoring System, "Weather Window," leverages AWS IoT Core to collect and send weather data (temperature and humidity) from a DHT11 sensor connected to a Raspberry Pi. The collected data is published to AWS IoT Core using MQTT, stored in a DynamoDB table, and notifications are sent using AWS Lambda functions and SNS.
+The Lambda zip files are expected next to `main.tf` and are not in this repository.
 
-### Key Features:
-- **AWS IoT Core Integration**: The system uses MQTT to publish sensor data to AWS IoT Core, ensuring real-time updates.
-- **Data Storage**: Weather data is stored in DynamoDB for historical reference and analysis.
-- **AWS Lambda**: Lambda functions are used to process messages, store data, and send alerts.
-- **Notifications**: Email notifications are sent using AWS SNS based on threshold values for temperature and humidity.
+## Running it
 
-## 🗺️ System Architecture
-The system architecture for "Weather Window" involves multiple components working together to provide real-time weather monitoring and alerting. Below is a high-level overview:
+```bash
+terraform init
+terraform apply
+pip install Adafruit_DHT awscrt awsiotsdk boto3
+python mqtt_email_notification.py
+```
 
-1. **Raspberry Pi**: Collects data from the DHT11 sensor and publishes it to AWS IoT Core using MQTT.
-2. **AWS IoT Core**: Serves as the central messaging broker that receives data from the Raspberry Pi.
-3. **AWS Lambda Functions**: Processes the incoming data, stores it in DynamoDB, and triggers alerts.
-4. **AWS DynamoDB**: Stores weather data for historical reference and analysis.
-5. **AWS SNS**: Sends email notifications when the data breaches the defined thresholds.
-
-![System Architecture Diagram](system_architecture.png)
-
-## 💡 Contributing
-Your contributions are welcome! Open an issue or pull request to suggest changes or additions.
-
-## 📄 License
-This project is under the [MIT License](https://choosealicense.com/licenses/mit/).
-
+Fill in the certificate, private key and CA file paths in the script. The IoT endpoint is read from an SSM parameter called `iot_endpoint`. Email credentials come from the `MY_EMAIL_PASSWORD` environment variable.
